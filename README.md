@@ -113,15 +113,29 @@ make  # Windows: nmake 或 mingw32-make
 程序配置自动保存在 `bin/flex_serialport_config.yaml` 文件中：
 ```yaml
 SerialPort:
-  portName: "COM3"
-  baudRate: 115200
+  portName: "COM1"
+  baudRate: 9600
+  dataBits: 8
+  stopBits: 1
+  parity: "N(无)"
+  timestampDisplay: true
+  hexDisplay: false
+  hexSend: false
+  autoSendEnter: true
+  enterChars: "0D0A"
   encoding: "UTF-8"
+
+Table:
+  rows: 6
+  cols: 8
 
 Buttons:
   "0,0":
-    remark: "查询版本"
-    command: "AT+VERSION?"
-    isHexCommand: false
+    remark: "按键1"
+    command: "1"
+    row: 0
+    col: 0
+    isValid: true
 ```
 
 ## 🙏 鸣谢
