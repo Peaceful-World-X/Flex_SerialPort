@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>Qt串口通信</string>
+   <string>Flex SerialPort - GitHub: Peaceful-World-X [免费开源工具]</string>
   </property>
   <widget class="QWidget" name="centralWidget">
    <widget class="QGroupBox" name="groupBox_2">
