@@ -322,9 +322,8 @@ void MainWindow::sendTextCommand(const QString &textCommand){
         return;
     }
 
-    // 使用选择的编码方式
-    QString encoding = ui->comboBox_encoding->currentText();
-    QByteArray data = encodeText(cleanText, encoding);
+    // 简化：直接使用UTF-8编码
+    QByteArray data = cleanText.toUtf8();
     sendDataToPort(data, cleanText, false);
 }
 
@@ -455,9 +454,8 @@ void MainWindow::sendMsg(const QString &msg){
         }
         data = QByteArray::fromHex(cleanMsg.toLatin1());
     } else {
-        // 使用选择的编码方式
-        QString encoding = ui->comboBox_encoding->currentText();
-        data = encodeText(cleanMsg, encoding);
+        // 简化：直接使用UTF-8编码
+        data = cleanMsg.toUtf8();
     }
 
     // 添加回车换行
@@ -505,35 +503,58 @@ void MainWindow::sendMsg(const QString &msg){
 }
 //接受来自串口的信息
 void MainWindow::recvMsg(){
-    QByteArray msg = this->serialPort->readAll();
-    if(msg.isEmpty()) return;
+    QByteArray newData = this->serialPort->readAll();
+    if(newData.isEmpty()) return;
 
-    receiveCount += msg.size();
+    receiveCount += newData.size();
     updateStatistics();
-    showStatusMessage(QString("接收：%1 字节").arg(msg.size()));
+    showStatusMessage(QString("接收：%1 字节").arg(newData.size()));
 
     if (!isPauseReceiveLog) {
-        QString displayMsg;
-        if (isHexDisplay) {
-            displayMsg = msg.toHex(' ').toUpper();
-        } else {
-            // 使用选择的编码方式解码
-            QString encoding = ui->comboBox_encoding->currentText();
-            displayMsg = decodeText(msg, encoding);
-        }
-
-        QString logEntry;
-        if (isTimestampDisplay) {
-            logEntry = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") + " " + displayMsg + "\n";
-        } else {
-            logEntry = displayMsg + "\n";
-        }
-        ui->comLog_2->insertPlainText(logEntry);
-
-        // 自动滚动到底部
-        ui->comLog_2->moveCursor(QTextCursor::End);
+        // 实时显示模式：立即显示接收到的数据，不使用缓存
+        displayCompleteMessage(newData);
     }
 }
+
+void MainWindow::displayCompleteMessage(const QByteArray &message){
+    // 使用UTF-8解码消息
+    QString displayMsg = QString::fromUtf8(message);
+
+    // 移除回车符，避免显示问题，但保留换行符
+    displayMsg.remove(QChar('\r'));
+
+    // 实时显示：不强制添加换行符，保持原始格式
+    QString logEntry;
+    if (isTimestampDisplay) {
+        // 只在数据开始时添加时间戳，避免每个字节都有时间戳
+        static QDateTime lastTimestamp;
+        QDateTime currentTime = QDateTime::currentDateTime();
+
+        // 如果距离上次时间戳超过1秒，或者数据以换行符开始，添加新时间戳
+        if (lastTimestamp.isNull() ||
+            lastTimestamp.msecsTo(currentTime) > 1000 ||
+            displayMsg.startsWith('\n')) {
+
+            if (!displayMsg.startsWith('\n') && !ui->comLog_2->toPlainText().endsWith('\n')) {
+                logEntry = "\n" + currentTime.toString("yyyy-MM-dd hh:mm:ss") + " " + displayMsg;
+            } else {
+                logEntry = currentTime.toString("yyyy-MM-dd hh:mm:ss") + " " + displayMsg;
+            }
+            lastTimestamp = currentTime;
+        } else {
+            logEntry = displayMsg;
+        }
+    } else {
+        logEntry = displayMsg;
+    }
+
+    ui->comLog_2->insertPlainText(logEntry);
+
+    // 自动滚动到底部
+    ui->comLog_2->moveCursor(QTextCursor::End);
+}
+
+// 缓存处理函数已移除，改为实时显示
 
 void MainWindow::onSerialError(QSerialPort::SerialPortError error){
     if(error == QSerialPort::NoError){
@@ -884,16 +905,56 @@ void MainWindow::onTableCellClicked(int row, int column){
     // 获取按键数据
     ButtonData data = buttonDatabase->getButtonData(row, column);
 
-    // 如果有关联的指令，发送它
+    // 如果有关联的指令，立即发送
     if(data.isValid && !data.command.isEmpty()){
-        if(data.isHexCommand){
-            // 16进制指令，直接发送
-            sendHexCommand(data.command);
-        } else {
-            // 字符指令，作为文本发送
-            sendTextCommand(data.command);
+        // 检查串口状态
+        if(!this->serialPort->isOpen()){
+            QMessageBox::warning(this, "警告", "串口未打开！");
+            showStatusMessage("串口未打开");
+            return;
         }
-        showStatusMessage(QString("发送指令: %1").arg(data.command));
+
+        // 直接发送，绕过所有中间函数
+        QByteArray sendData;
+        QString displayCommand;
+
+        if(data.isHexCommand) {
+            // 十六进制命令
+            QString cleanHex = data.command.trimmed();
+            if(!cleanHex.isEmpty() && validateHexInput(QString(cleanHex).remove(' '))) {
+                sendData = QByteArray::fromHex(cleanHex.toLatin1());
+                displayCommand = cleanHex;
+            }
+        } else {
+            // 文本命令
+            QString cleanText = data.command.trimmed();
+            if(!cleanText.isEmpty()) {
+                sendData = cleanText.toUtf8();
+                displayCommand = cleanText;
+            }
+        }
+
+        // 立即写入串口
+        if(!sendData.isEmpty()) {
+            qint64 bytesWritten = this->serialPort->write(sendData);
+            if(bytesWritten > 0) {
+                sendCount += bytesWritten;
+                updateStatistics();
+                showStatusMessage(QString("按键发送成功：%1 字节 [%2]").arg(bytesWritten).arg(displayCommand));
+
+                // 记录发送日志
+                if(!isPauseSendLog) {
+                    QString logMsg = data.isHexCommand ? sendData.toHex(' ').toUpper() : displayCommand;
+                    QString logEntry = isTimestampDisplay ?
+                        QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") + " " + logMsg + "\n" :
+                        logMsg + "\n";
+                    ui->comLog_1->insertPlainText(logEntry);
+                }
+            } else {
+                showStatusMessage("按键发送失败");
+                QMessageBox::warning(this, "错误", QString("按键发送失败！\n错误：%1").arg(this->serialPort->errorString()));
+            }
+        }
     }
 }
 
@@ -936,7 +997,7 @@ void MainWindow::removeTableRow(){
 
     int currentRows = ui->tableWidget->rowCount();
     if(currentRows <= 2){
-        QMessageBox::information(this, "提示", "至少需要保留2行！");
+        // QMessageBox::information(this, "提示", "至少需要保留2行！");
         return;
     }
 
@@ -999,7 +1060,7 @@ void MainWindow::saveAllConfigs(){
     config.hexSend = ui->checkBox_5->isChecked();
     config.autoSendEnter = ui->checkBox_4->isChecked();
     config.enterChars = ui->lineEdit->text();
-    config.encoding = ui->comboBox_encoding->currentText();
+    // 移除编码配置，固定使用UTF-8
 
     buttonDatabase->setSerialConfig(config);
 
@@ -1038,11 +1099,7 @@ void MainWindow::applySerialPortConfig(const SerialPortConfig &config){
     ui->checkBox_4->setChecked(config.autoSendEnter);
     ui->lineEdit->setText(config.enterChars);
 
-    // 设置编码选择
-    int encodingIndex = ui->comboBox_encoding->findText(config.encoding);
-    if(encodingIndex >= 0){
-        ui->comboBox_encoding->setCurrentIndex(encodingIndex);
-    }
+    // 移除编码选择设置，固定使用UTF-8
 
     // 更新内部状态
     isTimestampDisplay = config.timestampDisplay;
@@ -1166,120 +1223,7 @@ void MainWindow::resizeEvent(QResizeEvent *event){
     });
 }
 
-QByteArray MainWindow::encodeText(const QString &text, const QString &encoding){
-    if(encoding == "UTF-8"){
-        return text.toUtf8();
-    } else if(encoding == "GBK" || encoding == "GB2312"){
-        // 在Qt6中，对于GBK/GB2312编码，我们使用系统本地编码
-        // 在中文Windows系统上，这通常对应GBK编码
-        return text.toLocal8Bit();
-    } else if(encoding == "Big5"){
-        // 对于Big5编码，也使用系统本地编码
-        // 在繁体中文系统上，这通常对应Big5编码
-        return text.toLocal8Bit();
-    }
+// 编码处理函数已删除，统一使用UTF-8
 
-    // 默认使用UTF-8
-    return text.toUtf8();
-}
-
-QString MainWindow::decodeText(const QByteArray &data, const QString &encoding){
-    if(data.isEmpty()){
-        return QString();
-    }
-
-    if(encoding == "UTF-8"){
-        QString result = QString::fromUtf8(data);
-        // 如果UTF-8解码失败，尝试其他编码
-        if(result.contains(QChar::ReplacementCharacter)){
-            // 尝试GBK解码
-            result = QString::fromLocal8Bit(data);
-            if(result.contains(QChar::ReplacementCharacter)){
-                result = QString::fromLatin1(data);
-            }
-        }
-        return result;
-    } else if(encoding == "GBK" || encoding == "GB2312"){
-        // 对于GBK/GB2312，优先使用本地编码
-        QString result = QString::fromLocal8Bit(data);
-
-        // 检查解码是否成功（没有替换字符且不为空）
-        if(result.contains(QChar::ReplacementCharacter) ||
-           (result.isEmpty() && !data.isEmpty())){
-            // 如果本地编码失败，尝试UTF-8
-            result = QString::fromUtf8(data);
-            if(result.contains(QChar::ReplacementCharacter)){
-                // 最后尝试Latin-1（这通常不会失败）
-                result = QString::fromLatin1(data);
-            }
-        }
-        return result;
-    } else if(encoding == "Big5"){
-        // 对于Big5编码
-        QString result = QString::fromLocal8Bit(data);
-        if(result.contains(QChar::ReplacementCharacter) ||
-           (result.isEmpty() && !data.isEmpty())){
-            result = QString::fromUtf8(data);
-            if(result.contains(QChar::ReplacementCharacter)){
-                result = QString::fromLatin1(data);
-            }
-        }
-        return result;
-    }
-
-    // 默认情况：智能检测编码
-    // 首先尝试UTF-8
-    QString result = QString::fromUtf8(data);
-    if(!result.contains(QChar::ReplacementCharacter)){
-        return result;
-    }
-
-    // 然后尝试本地编码（通常是GBK）
-    result = QString::fromLocal8Bit(data);
-    if(!result.contains(QChar::ReplacementCharacter)){
-        return result;
-    }
-
-    // 最后使用Latin-1（不会失败）
-    return QString::fromLatin1(data);
-}
-
-QString MainWindow::autoDetectAndDecode(const QByteArray &data){
-    if(data.isEmpty()){
-        return QString();
-    }
-
-    // 尝试UTF-8解码
-    QString utf8Result = QString::fromUtf8(data);
-    bool utf8Valid = !utf8Result.contains(QChar::ReplacementCharacter);
-
-    // 尝试GBK解码（使用系统本地编码）
-    QString gbkResult = QString::fromLocal8Bit(data);
-    bool gbkValid = !gbkResult.contains(QChar::ReplacementCharacter);
-
-    // 调试信息
-    QString debugInfo = QString(" [字节: %1]").arg(data.toHex(' ').toUpper());
-
-    // 如果UTF-8有效且包含中文字符，优先使用UTF-8
-    if(utf8Valid && utf8Result.contains(QRegularExpression("[\\u4e00-\\u9fff]"))){
-        return utf8Result + debugInfo + " [检测: UTF-8]";
-    }
-
-    // 如果GBK有效且包含可打印字符，使用GBK
-    if(gbkValid && !gbkResult.isEmpty()){
-        return gbkResult + debugInfo + " [检测: GBK]";
-    }
-
-    // 如果UTF-8有效，使用UTF-8
-    if(utf8Valid){
-        return utf8Result + debugInfo + " [检测: UTF-8]";
-    }
-
-    // 如果GBK有效，使用GBK
-    if(gbkValid){
-        return gbkResult + debugInfo + " [检测: GBK]";
-    }
-
-    // 都不行，使用Latin-1作为最后的回退
-    return QString::fromLatin1(data) + debugInfo + " [检测: Latin-1]";
-}
+// =====================================================================================
+// 按键立即发送机制已集成到onTableCellClicked函数中

@@ -67,9 +67,8 @@ protected:
     bool validateHexInput(const QString &input);
     void showStatusMessage(const QString &message, int timeout = 3000);
     void parseAndApplyQuickConfig(const QString &configText);
-    QByteArray encodeText(const QString &text, const QString &encoding);
-    QString decodeText(const QByteArray &data, const QString &encoding);
-    QString autoDetectAndDecode(const QByteArray &data);
+    // 编码处理方法已删除，统一使用UTF-8
+    void displayCompleteMessage(const QByteArray &message);
     bool eventFilter(QObject *obj, QEvent *event);
     void resizeEvent(QResizeEvent *event) override;
 
@@ -112,6 +111,8 @@ private:
     // 自动发送
     QTimer *autoSendTimer;
     QString autoSendData;
+
+    // 实时接收显示，无需缓存机制
 };
 
 #endif // MAINWINDOW_H
