@@ -23,8 +23,6 @@ MainWindow::MainWindow(QWidget *parent): QMainWindow(parent), ui(new Ui::MainWin
     this->configManager = new ConfigManager(this);
     this->buttonDatabase = new ButtonDatabase(this);
     this->autoSendTimer = new QTimer(this);
-    this->sendQueueTimer = new QTimer(this);
-    this->debounceTimer = new QTimer(this);
 
     // 初始化变量
     sendCount = 0;
@@ -92,15 +90,6 @@ MainWindow::MainWindow(QWidget *parent): QMainWindow(parent), ui(new Ui::MainWin
     });
 
     connect(autoSendTimer, &QTimer::timeout, this, &MainWindow::onAutoSendTimeout);
-
-    // 配置发送队列定时器
-    sendQueueTimer->setSingleShot(true);
-    sendQueueTimer->setInterval(SEND_INTERVAL_MS);
-    connect(sendQueueTimer, &QTimer::timeout, this, &MainWindow::processSendQueue);
-
-    // 配置防抖定时器
-    debounceTimer->setSingleShot(true);
-    debounceTimer->setInterval(DEBOUNCE_DELAY_MS);
 
     // 为发送输入框安装事件过滤器，实现回车发送功能
     ui->message->installEventFilter(this);
@@ -522,36 +511,8 @@ void MainWindow::recvMsg(){
     showStatusMessage(QString("接收：%1 字节").arg(newData.size()));
 
     if (!isPauseReceiveLog) {
-        // 将新数据添加到缓存中
-        receiveBuffer.append(newData);
-
-        // 处理缓存中的完整消息
-        processReceiveBuffer();
-    }
-}
-
-void MainWindow::processReceiveBuffer(){
-    // 查找消息边界（换行符）
-    int pos = 0;
-    while ((pos = receiveBuffer.indexOf('\n', pos)) != -1) {
-        // 提取一条完整消息（包括换行符）
-        QByteArray completeMessage = receiveBuffer.left(pos + 1);
-
-        // 从缓存中移除已处理的消息
-        receiveBuffer.remove(0, pos + 1);
-
-        // 处理这条完整消息
-        displayCompleteMessage(completeMessage);
-
-        // 重置位置，继续查找下一条消息
-        pos = 0;
-    }
-
-    // 如果缓存中的数据太长（超过1KB）且没有换行符，强制显示
-    // 这可以处理没有换行符的长数据流
-    if (receiveBuffer.size() > 1024) {
-        displayCompleteMessage(receiveBuffer);
-        receiveBuffer.clear();
+        // 实时显示模式：立即显示接收到的数据，不使用缓存
+        displayCompleteMessage(newData);
     }
 }
 
@@ -562,15 +523,27 @@ void MainWindow::displayCompleteMessage(const QByteArray &message){
     // 移除回车符，避免显示问题，但保留换行符
     displayMsg.remove(QChar('\r'));
 
-    // 如果消息不以换行符结尾，添加一个
-    if (!displayMsg.endsWith('\n')) {
-        displayMsg += '\n';
-    }
-
+    // 实时显示：不强制添加换行符，保持原始格式
     QString logEntry;
     if (isTimestampDisplay) {
-        // 为每条完整消息添加时间戳
-        logEntry = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") + " " + displayMsg;
+        // 只在数据开始时添加时间戳，避免每个字节都有时间戳
+        static QDateTime lastTimestamp;
+        QDateTime currentTime = QDateTime::currentDateTime();
+
+        // 如果距离上次时间戳超过1秒，或者数据以换行符开始，添加新时间戳
+        if (lastTimestamp.isNull() ||
+            lastTimestamp.msecsTo(currentTime) > 1000 ||
+            displayMsg.startsWith('\n')) {
+
+            if (!displayMsg.startsWith('\n') && !ui->comLog_2->toPlainText().endsWith('\n')) {
+                logEntry = "\n" + currentTime.toString("yyyy-MM-dd hh:mm:ss") + " " + displayMsg;
+            } else {
+                logEntry = currentTime.toString("yyyy-MM-dd hh:mm:ss") + " " + displayMsg;
+            }
+            lastTimestamp = currentTime;
+        } else {
+            logEntry = displayMsg;
+        }
     } else {
         logEntry = displayMsg;
     }
@@ -580,6 +553,8 @@ void MainWindow::displayCompleteMessage(const QByteArray &message){
     // 自动滚动到底部
     ui->comLog_2->moveCursor(QTextCursor::End);
 }
+
+// 缓存处理函数已移除，改为实时显示
 
 void MainWindow::onSerialError(QSerialPort::SerialPortError error){
     if(error == QSerialPort::NoError){
@@ -930,10 +905,56 @@ void MainWindow::onTableCellClicked(int row, int column){
     // 获取按键数据
     ButtonData data = buttonDatabase->getButtonData(row, column);
 
-    // 如果有关联的指令，将其加入发送队列
+    // 如果有关联的指令，立即发送
     if(data.isValid && !data.command.isEmpty()){
-        QString displayText = QString("发送指令: %1").arg(data.command);
-        enqueueSendRequest(data.command, data.isHexCommand, displayText);
+        // 检查串口状态
+        if(!this->serialPort->isOpen()){
+            QMessageBox::warning(this, "警告", "串口未打开！");
+            showStatusMessage("串口未打开");
+            return;
+        }
+
+        // 直接发送，绕过所有中间函数
+        QByteArray sendData;
+        QString displayCommand;
+
+        if(data.isHexCommand) {
+            // 十六进制命令
+            QString cleanHex = data.command.trimmed();
+            if(!cleanHex.isEmpty() && validateHexInput(QString(cleanHex).remove(' '))) {
+                sendData = QByteArray::fromHex(cleanHex.toLatin1());
+                displayCommand = cleanHex;
+            }
+        } else {
+            // 文本命令
+            QString cleanText = data.command.trimmed();
+            if(!cleanText.isEmpty()) {
+                sendData = cleanText.toUtf8();
+                displayCommand = cleanText;
+            }
+        }
+
+        // 立即写入串口
+        if(!sendData.isEmpty()) {
+            qint64 bytesWritten = this->serialPort->write(sendData);
+            if(bytesWritten > 0) {
+                sendCount += bytesWritten;
+                updateStatistics();
+                showStatusMessage(QString("按键发送成功：%1 字节 [%2]").arg(bytesWritten).arg(displayCommand));
+
+                // 记录发送日志
+                if(!isPauseSendLog) {
+                    QString logMsg = data.isHexCommand ? sendData.toHex(' ').toUpper() : displayCommand;
+                    QString logEntry = isTimestampDisplay ?
+                        QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") + " " + logMsg + "\n" :
+                        logMsg + "\n";
+                    ui->comLog_1->insertPlainText(logEntry);
+                }
+            } else {
+                showStatusMessage("按键发送失败");
+                QMessageBox::warning(this, "错误", QString("按键发送失败！\n错误：%1").arg(this->serialPort->errorString()));
+            }
+        }
     }
 }
 
@@ -976,7 +997,7 @@ void MainWindow::removeTableRow(){
 
     int currentRows = ui->tableWidget->rowCount();
     if(currentRows <= 2){
-        QMessageBox::information(this, "提示", "至少需要保留2行！");
+        // QMessageBox::information(this, "提示", "至少需要保留2行！");
         return;
     }
 
@@ -1205,61 +1226,4 @@ void MainWindow::resizeEvent(QResizeEvent *event){
 // 编码处理函数已删除，统一使用UTF-8
 
 // =====================================================================================
-// 发送队列和防抖机制实现
-
-void MainWindow::enqueueSendRequest(const QString &command, bool isHexCommand, const QString &displayText) {
-    if(!this->serialPort->isOpen()){
-        QMessageBox::warning(this, "警告", "串口未打开！");
-        showStatusMessage("串口未打开");
-        return;
-    }
-
-    // 将发送请求加入队列
-    sendQueue.enqueue(SendRequest(command, isHexCommand, displayText));
-
-    // 如果队列定时器没有运行，立即开始处理
-    if(!sendQueueTimer->isActive() && !debounceTimer->isActive()) {
-        debounceTimer->start(); // 先启动防抖定时器
-        connect(debounceTimer, &QTimer::timeout, this, [this]() {
-            processSendQueue();
-            debounceTimer->disconnect(); // 断开连接避免重复触发
-        }, Qt::SingleShotConnection);
-    }
-}
-
-void MainWindow::processSendQueue() {
-    if(sendQueue.isEmpty() || !this->serialPort->isOpen()) {
-        return;
-    }
-
-    // 处理队列中的第一个请求
-    SendRequest request = sendQueue.dequeue();
-
-    // 根据命令类型发送数据
-    if(request.isHexCommand) {
-        // 处理十六进制命令
-        QString cleanHex = request.command.trimmed();
-        if(!cleanHex.isEmpty() && validateHexInput(QString(cleanHex).remove(' '))) {
-            QByteArray data = QByteArray::fromHex(cleanHex.toLatin1());
-            sendDataToPort(data, cleanHex, true);
-        }
-    } else {
-        // 处理文本命令
-        QString cleanText = request.command.trimmed();
-        if(!cleanText.isEmpty()) {
-            // 简化：直接使用UTF-8编码
-            QByteArray data = cleanText.toUtf8();
-            sendDataToPort(data, cleanText, false);
-        }
-    }
-
-    // 显示状态消息
-    if(!request.displayText.isEmpty()) {
-        showStatusMessage(request.displayText);
-    }
-
-    // 如果队列中还有请求，启动定时器继续处理
-    if(!sendQueue.isEmpty()) {
-        sendQueueTimer->start();
-    }
-}
+// 按键立即发送机制已集成到onTableCellClicked函数中

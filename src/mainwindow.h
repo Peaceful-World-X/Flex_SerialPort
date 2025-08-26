@@ -31,7 +31,6 @@
 #include <QStatusBar>
 #include <QTextCursor>
 #include <QPoint>
-#include <QQueue>
 #include "configmanager.h"
 #include "buttondatabase.h"
 
@@ -69,7 +68,6 @@ protected:
     void showStatusMessage(const QString &message, int timeout = 3000);
     void parseAndApplyQuickConfig(const QString &configText);
     // 编码处理方法已删除，统一使用UTF-8
-    void processReceiveBuffer();
     void displayCompleteMessage(const QByteArray &message);
     bool eventFilter(QObject *obj, QEvent *event);
     void resizeEvent(QResizeEvent *event) override;
@@ -114,27 +112,7 @@ private:
     QTimer *autoSendTimer;
     QString autoSendData;
 
-    // 接收数据缓存
-    QByteArray receiveBuffer;
-
-    // 发送队列和防抖机制
-    struct SendRequest {
-        QString command;
-        bool isHexCommand;
-        QString displayText;
-
-        SendRequest(const QString &cmd, bool isHex, const QString &display = "")
-            : command(cmd), isHexCommand(isHex), displayText(display) {}
-    };
-
-    QQueue<SendRequest> sendQueue;
-    QTimer *sendQueueTimer;
-    QTimer *debounceTimer;
-    static const int SEND_INTERVAL_MS = 50;  // 发送间隔50ms
-    static const int DEBOUNCE_DELAY_MS = 10; // 防抖延迟10ms
-
-    void processSendQueue();
-    void enqueueSendRequest(const QString &command, bool isHexCommand, const QString &displayText = "");
+    // 实时接收显示，无需缓存机制
 };
 
 #endif // MAINWINDOW_H
