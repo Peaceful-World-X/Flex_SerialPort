@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>Flex SerialPort - GitHub: Peaceful-World-X [免费开源工具]</string>
+   <string>Flex SerialPort</string>
   </property>
   <widget class="QWidget" name="centralWidget">
    <widget class="QGroupBox" name="groupBox_2">
@@ -212,53 +212,6 @@
           <item>
            <property name="text">
             <string>2</string>
-           </property>
-          </item>
-         </widget>
-        </item>
-       </layout>
-      </item>
-      <item>
-       <layout class="QHBoxLayout" name="horizontalLayout_encoding">
-        <item>
-         <widget class="QLabel" name="label_encoding">
-          <property name="minimumSize">
-           <size>
-            <width>10</width>
-            <height>0</height>
-           </size>
-          </property>
-          <property name="maximumSize">
-           <size>
-            <width>60</width>
-            <height>16777215</height>
-           </size>
-          </property>
-          <property name="text">
-           <string>中文编码</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QComboBox" name="comboBox_encoding">
-          <item>
-           <property name="text">
-            <string>UTF-8</string>
-           </property>
-          </item>
-          <item>
-           <property name="text">
-            <string>GBK</string>
-           </property>
-          </item>
-          <item>
-           <property name="text">
-            <string>GB2312</string>
-           </property>
-          </item>
-          <item>
-           <property name="text">
-            <string>Big5</string>
            </property>
           </item>
          </widget>
