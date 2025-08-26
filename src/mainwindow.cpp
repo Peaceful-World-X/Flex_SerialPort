@@ -523,26 +523,18 @@ void MainWindow::displayCompleteMessage(const QByteArray &message){
     // 移除回车符，避免显示问题，但保留换行符
     displayMsg.remove(QChar('\r'));
 
-    // 实时显示：不强制添加换行符，保持原始格式
+    // 实时显示：保持原始格式
     QString logEntry;
     if (isTimestampDisplay) {
-        // 只在数据开始时添加时间戳，避免每个字节都有时间戳
-        static QDateTime lastTimestamp;
+        // 每次接收都立即添加时间戳
         QDateTime currentTime = QDateTime::currentDateTime();
+        QString timestamp = currentTime.toString("yyyy-MM-dd hh:mm:ss");
 
-        // 如果距离上次时间戳超过1秒，或者数据以换行符开始，添加新时间戳
-        if (lastTimestamp.isNull() ||
-            lastTimestamp.msecsTo(currentTime) > 1000 ||
-            displayMsg.startsWith('\n')) {
-
-            if (!displayMsg.startsWith('\n') && !ui->comLog_2->toPlainText().endsWith('\n')) {
-                logEntry = "\n" + currentTime.toString("yyyy-MM-dd hh:mm:ss") + " " + displayMsg;
-            } else {
-                logEntry = currentTime.toString("yyyy-MM-dd hh:mm:ss") + " " + displayMsg;
-            }
-            lastTimestamp = currentTime;
+        // 如果接收窗口不为空且不以换行符结尾，先添加换行符
+        if (!ui->comLog_2->toPlainText().isEmpty() && !ui->comLog_2->toPlainText().endsWith('\n')) {
+            logEntry = "\n" + timestamp + " " + displayMsg;
         } else {
-            logEntry = displayMsg;
+            logEntry = timestamp + " " + displayMsg;
         }
     } else {
         logEntry = displayMsg;
@@ -931,6 +923,16 @@ void MainWindow::onTableCellClicked(int row, int column){
             if(!cleanText.isEmpty()) {
                 sendData = cleanText.toUtf8();
                 displayCommand = cleanText;
+            }
+        }
+
+        // 添加回车换行（如果启用）
+        if(ui->checkBox_4->isChecked() && !sendData.isEmpty()){
+            QString endChars = ui->lineEdit->text().trimmed();
+            if(!endChars.isEmpty()){
+                if(validateHexInput(endChars)){
+                    sendData.append(QByteArray::fromHex(endChars.toLatin1()));
+                }
             }
         }
 
