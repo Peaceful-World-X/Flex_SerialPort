@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/github/license/Peaceful-World-X/Flex_SerialPort" alt="License"/>
   <img src="https://img.shields.io/badge/Qt-6.x-green.svg" alt="Qt Version"/>
   <img src="https://img.shields.io/badge/C++-17-blue.svg" alt="C++ Version"/>
-  <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg" alt="Platform"/>
+  <img src="https://visitor-badge.laobi.icu/badge?page_id=Peaceful-World-X.Flex_SerialPort" alt="Visitors"/>
   <img src="https://img.shields.io/github/downloads/Peaceful-World-X/Flex_SerialPort/total" alt="Downloads"/>
 </p>
 
